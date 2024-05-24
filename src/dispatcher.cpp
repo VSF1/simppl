@@ -58,13 +58,14 @@ std::string generate_property_matchstring(simppl::dbus::StubBase& stub)
    return match_string.str();
 }
 
-
+#if 0
 inline
 std::chrono::steady_clock::time_point
 get_lookup_duetime()
 {
    return std::chrono::steady_clock::now() + 5s;
 }
+#endif
 
 
 DBusHandlerResult signal_filter(DBusConnection* /*connection*/, DBusMessage* msg, void *user_data)
