@@ -5,7 +5,6 @@
 
 #include <unistd.h>
 
-#include <iostream>
 #include <map>
 #include <set>
 #include <atomic>
@@ -497,6 +496,36 @@ Dispatcher::~Dispatcher()
 }
 
 
+void Dispatcher::notify_connected(StubBase& stub)
+{	
+	std::ostringstream objpath;
+	objpath << "/org/simppl/dispatcher/" << ::getpid() << '/' << this;
+
+	DBusMessage* msg = dbus_message_new_signal(objpath.str().c_str(), "org.simppl.dispatcher", "notify_client");
+
+	DBusMessageIter iter;
+	dbus_message_iter_init_append(msg, &iter);
+
+	encode(iter, stub.busname(), stub.objectpath());
+
+	dbus_connection_send(conn_, msg, nullptr);
+	dbus_message_unref(msg);
+}
+
+
+void Dispatcher::notify_client(const std::string& boundname, const std::string& objpath)
+{
+	auto r = d->stubs_.equal_range(objpath);
+	
+	auto iter = r.first;
+	while(iter != r.second)
+	{
+		iter->second->connection_state_changed(ConnectionState::Connected, true);		
+		++iter;
+	}
+}
+
+
 void Dispatcher::notify_clients(const std::string& busname, ConnectionState state)
 {
    std::for_each(d->stubs_.begin(), d->stubs_.end(), [busname, state](auto& entry){
@@ -619,14 +648,15 @@ DBusHandlerResult Dispatcher::try_handle_signal(DBusMessage* msg)
         if (!strcmp(dbus_message_get_member(msg), "notify_client"))
         {
            std::string busname;
+           std::string objpath;
 
            DBusMessageIter iter;
            dbus_message_iter_init(msg, &iter);
 
-           decode(iter, busname);
+           decode(iter, busname, objpath);
 
-           if (d->busnames_.find(busname) != d->busnames_.end())
-                notify_clients(busname, ConnectionState::Connected);
+           if (d->busnames_.find(busname) != d->busnames_.end())           
+              notify_client(busname, objpath);		   
 
            return DBUS_HANDLER_RESULT_HANDLED;
         }
@@ -697,26 +727,14 @@ bool Dispatcher::is_running() const
 void Dispatcher::add_client(StubBase& clnt)
 {
    clnt.disp_ = this;
-
+   
    d->stubs_.emplace(clnt.objectpath(), &clnt);
-
-   // send connected request from event loop
+   
    auto iter = d->busnames_.find(clnt.busname());
-   if (iter != d->busnames_.end())
-   {
-      std::ostringstream objpath;
-      objpath << "/org/simppl/dispatcher/" << ::getpid() << '/' << this;
 
-      DBusMessage* msg = dbus_message_new_signal(objpath.str().c_str(), "org.simppl.dispatcher", "notify_client");
-
-      DBusMessageIter iter;
-      dbus_message_iter_init_append(msg, &iter);
-
-      encode(iter, clnt.busname());
-
-      dbus_connection_send(conn_, msg, nullptr);
-      dbus_message_unref(msg);
-   }
+   // send connected request from event loop   
+   if (iter != d->busnames_.end())      
+	  notify_connected(clnt);            
 }
 
 

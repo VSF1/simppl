@@ -9,6 +9,7 @@
 #include "simppl/serverside.h"
 #include "simppl/typelist.h"
 #include "simppl/detail/interposer.h"
+#include "simppl/detail/objectmanagerinterposer.h"
 
 
 namespace simppl
@@ -22,16 +23,18 @@ void dispatcher_add_skeleton(Dispatcher&, StubBase&);
 
 
 template<template<int,
-                  typename,
                   template<typename...> class,
                   template<typename...> class,
                   template<typename,int> class,
                   typename> class... Is>
-struct Skeleton : detail::Interposer<sizeof...(Is)-1, detail::SizedSkeletonBase<sizeof...(Is)>, ServerMethod, ServerSignal, ServerProperty, Is...>
+struct Skeleton : public detail::Interposer<sizeof...(Is)-1,
+                                            detail::SizedSkeletonBase<sizeof...(Is)>,
+                                            typename detail::ObjectManagerInterposer<Is...>::type,
+                                            Is...>
 {
     friend struct Dispatcher;
 
-    using interface_list = make_typelist<Is<0, SkeletonBase, ServerMethod, ServerSignal, ServerProperty, SkeletonBase>...>;
+    using interface_list = make_typelist<typename detail::make_server_type<Is>::type...>;
 
     static constexpr std::size_t iface_count = sizeof...(Is);
 
