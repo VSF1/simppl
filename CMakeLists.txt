@@ -2,7 +2,7 @@
 # Setup the cmake file to be added with a find_package
 # or an add_subdirectory.
 #
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(simppl VERSION 0.4.0)
 
 # Configuration specific to being the main project
@@ -39,9 +39,9 @@ endif()
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
-find_package(Boost)
-
+find_package(Boost CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(DBus REQUIRED)
 pkg_check_modules(DBUS REQUIRED dbus-1)
 
 add_library(simppl SHARED
