@@ -86,10 +86,9 @@ struct CallbackHolder
 
        TCallState<ErrorT> cs(*msg);
 
-       DBusMessageIter iter;
-       dbus_message_iter_init(msg.get(), &iter);
+       Decoder d(msg.get());
 
-       GetCaller<ReturnT>::type::template evalResponse(iter, that->f_, cs);
+       GetCaller<ReturnT>::type::template evalResponse(d, that->f_, cs);
    }
 
    FuncT f_;
@@ -128,11 +127,10 @@ struct PropertyCallbackHolder
        simppl::dbus::CallState cs(*msg);
        if (cs)
        {
-          DBusMessageIter iter;
-          dbus_message_iter_init(msg.get(), &iter);
+          Decoder d(msg.get());
 
           std::variant<DataT> v;
-          decode(iter, v);
+          decode(d, v);
 
           that->f_(cs, std::get<DataT>(v));
        }

@@ -14,22 +14,19 @@ namespace dbus
 {
  
  
-struct StringCodec
+struct StringCodec : composite_signature<signature_chars<DBUS_TYPE_STRING>>
 {
    static 
-   void encode(DBusMessageIter& s, const std::string& str);
+   void encode(Encoder& e, const std::string& str);
    
    static 
-   void decode(DBusMessageIter& s, std::string& str);
+   void decode(Decoder& d, std::string& str);
    
    static 
-   void encode(DBusMessageIter& s, const char* str);
+   void encode(Encoder& e, const char* str);
    
    static 
-   void decode(DBusMessageIter& s, char*& str);
-   
-   static
-   std::ostream& make_type_signature(std::ostream& os);
+   void decode(Decoder& d, char*& str);
 };
 
    

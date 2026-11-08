@@ -14,27 +14,11 @@
 
 namespace {
 
-struct TimeoutRAIIHelper
+/// @return the timeout in milliseconds for libdbus
+int effective_timeout(simppl::dbus::Dispatcher& disp, std::chrono::milliseconds timeout)
 {
-    TimeoutRAIIHelper(simppl::dbus::Dispatcher& disp)
-     : timeout_(disp.request_timeout())
-    {
-        if (simppl::dbus::detail::request_specific_timeout.count() > 0)
-            timeout_ = simppl::dbus::detail::request_specific_timeout.count();
-    }
-
-    ~TimeoutRAIIHelper()
-    {
-        simppl::dbus::detail::request_specific_timeout = std::chrono::milliseconds(0);
-    }
-
-    operator int()
-    {
-        return timeout_;
-    }
-
-    int timeout_;
-};
+    return timeout.count() > 0 ? timeout.count() : disp.request_timeout();
+}
 
 }   // namespace
 
@@ -89,7 +73,6 @@ void StubBase::Connected::state_changed(ConnectionState state, bool force)
 StubBase::StubBase()
  : connected(this)
  , get_all_properties(*this)
- , objectpath_(nullptr) 
  , disp_(nullptr)
  , signals_(nullptr)
  , attached_properties_(0)
@@ -102,8 +85,6 @@ StubBase::~StubBase()
 {
    if (disp_)
       disp_->remove_client(*this);
-
-   delete[] objectpath_;
 }
 
 
@@ -114,9 +95,7 @@ void StubBase::init(char* iface, const char* busname, const char* objectpath)
 
     ifaces_ = detail::extract_interfaces(1, iface);
 
-    objectpath_ = new char[strlen(objectpath)+1];
-    strcpy(objectpath_, objectpath);
-
+    objectpath_ = objectpath;
     busname_ = busname;
 
     free(iface);
@@ -130,11 +109,7 @@ void StubBase::init(char* iface, const char* role)
     ifaces_ = detail::extract_interfaces(1, iface);
 
     objectpath_ = detail::create_objectpath(this->iface(), role);
-
-    busname_.reserve(strlen(this->iface()) + 1 + strlen(role));
-    busname_ = this->iface();
-    busname_ += ".";
-    busname_ += role;
+    busname_ = detail::create_busname(this->iface(), role);
 
     free(iface);
 }
@@ -159,7 +134,7 @@ Dispatcher& StubBase::disp()
 }
 
 
-void StubBase::get_all_properties_request()
+void StubBase::get_all_properties_request(std::chrono::milliseconds timeout)
 {
     message_ptr_t msg = make_message(dbus_message_new_method_call(busname().c_str(), objectpath(), "org.freedesktop.DBus.Properties", "GetAll"));
     DBusPendingCall* pending = nullptr;
@@ -169,7 +144,7 @@ void StubBase::get_all_properties_request()
 
     encode(iter, iface());
 
-    dbus_connection_send_with_reply(conn(), msg.get(), &pending, TimeoutRAIIHelper(disp()));
+    dbus_connection_send_with_reply(conn(), msg.get(), &pending, effective_timeout(disp(), timeout));
 
     dbus_pending_call_block(pending);
 
@@ -222,7 +197,10 @@ simppl::dbus::CallState StubBase::get_all_properties_handle_response(DBusMessage
 
             // get value and call
             if (propiter != properties_.end())
-                propiter->first->eval(&__iter);
+            {
+                Decoder d(__iter, &response);
+                propiter->first->eval(&d);
+            }
 
             dbus_message_iter_next(&_iter);
         }
@@ -232,7 +210,7 @@ simppl::dbus::CallState StubBase::get_all_properties_handle_response(DBusMessage
 }
 
 
-StubBase::getall_properties_holder_type StubBase::get_all_properties_request_async()
+StubBase::getall_properties_holder_type StubBase::get_all_properties_request_async(std::chrono::milliseconds timeout)
 {
     message_ptr_t msg = make_message(dbus_message_new_method_call(busname().c_str(), objectpath(), "org.freedesktop.DBus.Properties", "GetAll"));
     DBusPendingCall* pending = nullptr;
@@ -244,13 +222,13 @@ StubBase::getall_properties_holder_type StubBase::get_all_properties_request_asy
         encode(iter, iface());
     }
 
-    dbus_connection_send_with_reply(conn(), msg.get(), &pending, TimeoutRAIIHelper(disp()));
+    dbus_connection_send_with_reply(conn(), msg.get(), &pending, effective_timeout(disp(), timeout));
 
     return getall_properties_holder_type(PendingCall(dbus_message_get_serial(msg.get()), pending), *this);
 }
 
 
-PendingCall StubBase::send_request(ClientMethodBase* method, std::function<void(DBusMessageIter&)>&& f, bool is_oneway)
+PendingCall StubBase::send_request(ClientMethodBase* method, std::function<void(DBusMessageIter&)>&& f, bool is_oneway, std::chrono::milliseconds timeout)
 {
     message_ptr_t msg = make_message(dbus_message_new_method_call(busname().c_str(), objectpath(), iface(), method->method_name_));
     DBusPendingCall* pending = nullptr;
@@ -262,7 +240,7 @@ PendingCall StubBase::send_request(ClientMethodBase* method, std::function<void(
 
     if (!is_oneway)
     {
-        dbus_connection_send_with_reply(disp().conn_, msg.get(), &pending, TimeoutRAIIHelper(disp()));
+        dbus_connection_send_with_reply(disp().conn_, msg.get(), &pending, effective_timeout(disp(), timeout));
     }
     else
     {
@@ -277,7 +255,7 @@ PendingCall StubBase::send_request(ClientMethodBase* method, std::function<void(
 }
 
 
-message_ptr_t StubBase::send_request_and_block(ClientMethodBase* method, std::function<void(DBusMessageIter&)>&& f, bool is_oneway)
+message_ptr_t StubBase::send_request_and_block(ClientMethodBase* method, std::function<void(DBusMessageIter&)>&& f, bool is_oneway, std::chrono::milliseconds timeout)
 {
     message_ptr_t msg = make_message(dbus_message_new_method_call(busname().c_str(), objectpath(), iface(), method->method_name_));
     DBusPendingCall* pending = nullptr;
@@ -290,7 +268,7 @@ message_ptr_t StubBase::send_request_and_block(ClientMethodBase* method, std::fu
 
     if (!is_oneway)
     {
-        dbus_connection_send_with_reply(disp().conn_, msg.get(), &pending, TimeoutRAIIHelper(disp()));
+        dbus_connection_send_with_reply(disp().conn_, msg.get(), &pending, effective_timeout(disp(), timeout));
 
         dbus_pending_call_block(pending);
 
@@ -427,7 +405,7 @@ void StubBase::cleanup()
 }
 
 
-PendingCall StubBase::get_property_async(const char* name)
+PendingCall StubBase::get_property_async(const char* name, std::chrono::milliseconds timeout)
 {
    message_ptr_t msg = make_message(dbus_message_new_method_call(busname().c_str(), objectpath(), "org.freedesktop.DBus.Properties", "Get"));
    DBusPendingCall* pending = nullptr;
@@ -437,14 +415,13 @@ PendingCall StubBase::get_property_async(const char* name)
 
    encode(iter, iface(), name);
 
-    // TODO request specific timeout handling here
-   dbus_connection_send_with_reply(conn(), msg.get(), &pending, disp().request_timeout());
+   dbus_connection_send_with_reply(conn(), msg.get(), &pending, effective_timeout(disp(), timeout));
 
    return PendingCall(dbus_message_get_serial(msg.get()), pending);
 }
 
 
-message_ptr_t StubBase::get_property(const char* name)
+message_ptr_t StubBase::get_property(const char* name, std::chrono::milliseconds timeout)
 {
    message_ptr_t msg = make_message(dbus_message_new_method_call(busname().c_str(), objectpath(), "org.freedesktop.DBus.Properties", "Get"));
 
@@ -456,8 +433,7 @@ message_ptr_t StubBase::get_property(const char* name)
    DBusError err;
    dbus_error_init(&err);
 
-   // TODO request specific timeout handling here
-   DBusMessage* reply = dbus_connection_send_with_reply_and_block(conn(), msg.get(), disp().request_timeout(), &err);
+   DBusMessage* reply = dbus_connection_send_with_reply_and_block(conn(), msg.get(), effective_timeout(disp(), timeout), &err);
 
    // drop original message
    msg.reset(reply);
@@ -476,7 +452,7 @@ message_ptr_t StubBase::get_property(const char* name)
 }
 
 
-void StubBase::set_property(const char* name, std::function<void(DBusMessageIter&)>&& f)
+void StubBase::set_property(const char* name, std::function<void(DBusMessageIter&)>&& f, std::chrono::milliseconds timeout)
 {
     message_ptr_t msg = make_message(dbus_message_new_method_call(busname().c_str(), objectpath(), "org.freedesktop.DBus.Properties", "Set"));
 
@@ -490,8 +466,7 @@ void StubBase::set_property(const char* name, std::function<void(DBusMessageIter
      DBusError err;
      dbus_error_init(&err);
 
-     // TODO request specific timeout handling here
-     DBusMessage* reply = dbus_connection_send_with_reply_and_block(disp().conn_, msg.get(), disp().request_timeout(), &err);
+     DBusMessage* reply = dbus_connection_send_with_reply_and_block(disp().conn_, msg.get(), effective_timeout(disp(), timeout), &err);
 
      // drop original message
      msg.reset(reply);
@@ -508,7 +483,7 @@ void StubBase::set_property(const char* name, std::function<void(DBusMessageIter
 }
 
 
-PendingCall StubBase::set_property_async(const char* name, std::function<void(DBusMessageIter&)>&& f)
+PendingCall StubBase::set_property_async(const char* name, std::function<void(DBusMessageIter&)>&& f, std::chrono::milliseconds timeout)
 {
     message_ptr_t msg = make_message(dbus_message_new_method_call(busname().c_str(), objectpath(), "org.freedesktop.DBus.Properties", "Set"));
 
@@ -520,8 +495,7 @@ PendingCall StubBase::set_property_async(const char* name, std::function<void(DB
 
     DBusPendingCall* pending = nullptr;
 
-    // TODO request specific timeout handling here
-    dbus_connection_send_with_reply(disp().conn_, msg.get(), &pending, disp().request_timeout());
+    dbus_connection_send_with_reply(disp().conn_, msg.get(), &pending, effective_timeout(disp(), timeout));
 
     return PendingCall(dbus_message_get_serial(msg.get()), pending);
 }
@@ -553,7 +527,10 @@ void StubBase::try_handle_signal(DBusMessage* msg)
          auto propiter = std::find_if(properties_.begin(), properties_.end(), [&property_name](auto& pair){ return property_name == pair.first->name_; });
 
          if (propiter != properties_.end() && propiter->second)
-            propiter->first->eval(&item_iterator);
+         {
+            Decoder d(item_iterator, msg);
+            propiter->first->eval(&d);
+         }
 
          // advance to next element
          dbus_message_iter_next(&iter);
@@ -585,10 +562,8 @@ void StubBase::try_handle_signal(DBusMessage* msg)
       {
          if (!strcmp(sig->name_, dbus_message_get_member(msg)))
          {
-            DBusMessageIter iter;
-            dbus_message_iter_init(msg, &iter);
-
-            sig->eval(iter);
+            Decoder d(msg);
+            sig->eval(d);
             break;
          }
 

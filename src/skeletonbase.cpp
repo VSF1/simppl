@@ -425,7 +425,8 @@ DBusHandlerResult SkeletonBase::handle_property_set_request(DBusMessage* msg, Se
 
     try
     {
-        property.evalSet(iter);
+        Decoder d(iter, msg);
+        property.evalSet(d);
         response = make_message(dbus_message_new_method_return(msg));
     }
     catch(const simppl::dbus::Error& err)

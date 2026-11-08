@@ -15,53 +15,72 @@ namespace dbus
     
    
 template<typename T>
-struct Codec<std::vector<T>>
+struct Codec<std::vector<T>> : composite_signature<signature_chars<DBUS_TYPE_ARRAY>, Codec<T>>
 {
    static 
-   void encode(DBusMessageIter& s, const std::vector<T>& v)
+   void encode(Encoder& e, const std::vector<T>& v)
    {
-      DBusMessageIter iter;
-      
-      std::ostringstream buf;
-      Codec<T>::make_type_signature(buf);
-
-      dbus_message_iter_open_container(&s, DBUS_TYPE_ARRAY, buf.str().c_str(), &iter);
+      Encoder array = e.open_container(DBUS_TYPE_ARRAY, signature_of<T>());
 
       for (auto& t : v) 
       {
-         Codec<T>::encode(iter, t);
+         detail::encode_one<T>(array, t);
       }
-
-      dbus_message_iter_close_container(&s, &iter);
    }
    
    
    static 
-   void decode(DBusMessageIter& s, std::vector<T>& v)
+   void decode(Decoder& d, std::vector<T>& v)
    {
       v.clear();
 
-      DBusMessageIter iter;
-      simppl_dbus_message_iter_recurse(&s, &iter, DBUS_TYPE_ARRAY);
+      Decoder array = d.recurse(DBUS_TYPE_ARRAY);
 
-      while(dbus_message_iter_get_arg_type(&iter) != 0)
+      while(!array.at_end())
       {
          T t;
-         Codec<T>::decode(iter, t);
+         detail::decode_one<T>(array, t);
          v.push_back(t);
       }
 
       // advance to next element
-      dbus_message_iter_next(&s);
+      d.next();
    }
-   
-   
-   static inline
-   std::ostream& make_type_signature(std::ostream& os)
+};
+
+
+
+/**
+ * std::vector<bool> packs its elements, so it is converted from and to
+ * an array of dbus_bool_t in one go.
+ */
+template<>
+struct Codec<std::vector<bool>> : composite_signature<signature_chars<DBUS_TYPE_ARRAY, DBUS_TYPE_BOOLEAN>>
+{
+   static
+   void encode(Encoder& e, const std::vector<bool>& v)
    {
-      return Codec<T>::make_type_signature(os << DBUS_TYPE_ARRAY_AS_STRING);
+      const std::vector<dbus_bool_t> values(v.begin(), v.end());
+
+      Encoder array = e.open_container(DBUS_TYPE_ARRAY, DBUS_TYPE_BOOLEAN_AS_STRING);
+      array.append_fixed_array(DBUS_TYPE_BOOLEAN, values.data(), values.size());
    }
 
+
+   static
+   void decode(Decoder& d, std::vector<bool>& v)
+   {
+      Decoder array = d.recurse(DBUS_TYPE_ARRAY);
+
+      const dbus_bool_t* values = nullptr;
+      int n = 0;
+      dbus_message_iter_get_fixed_array(&array.native(), &values, &n);
+
+      v.assign(values, values + n);
+
+      // advance to next element
+      d.next();
+   }
 };
 
    

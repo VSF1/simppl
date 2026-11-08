@@ -109,7 +109,8 @@ struct ServerSignal : ServerSignalBase
    void notify(typename CallTraits<T>::param_type... args)
    {
        parent_->send_signal(this->name_, this->iface_id_, [&](DBusMessageIter& iter){
-            encode(iter, args...);
+            Encoder e(iter);
+            encode(e, args...);
        });
    }
 
@@ -185,10 +186,9 @@ private:
    static
    void __eval(ServerMethodBase* obj, DBusMessage* msg)
    {
-       DBusMessageIter iter;
-       dbus_message_iter_init(msg, &iter);
+       Decoder d(msg);
 
-       detail::GetCaller<args_type>::type::template eval(iter, ((ServerMethod*)obj)->f_);
+       detail::GetCaller<args_type>::type::template eval(d, ((ServerMethod*)obj)->f_);
    }
 
 
@@ -204,7 +204,8 @@ private:
    detail::ServerResponseHolder __impl(std::true_type, const T&... t)
    {
       return detail::ServerResponseHolder([&](DBusMessageIter& s){
-         serializer_type::eval(s, t...);
+         Encoder e(s);
+         serializer_type::eval(e, t...);
       });
    }
 
@@ -222,7 +223,7 @@ private:
 struct ServerPropertyBase
 {
    typedef void (*eval_type)(ServerPropertyBase*, DBusMessageIter*);
-   typedef void (*eval_set_type)(ServerPropertyBase*, DBusMessageIter&);
+   typedef void (*eval_set_type)(ServerPropertyBase*, Decoder&);
 
    ServerPropertyBase(const char* name, SkeletonBase* iface, int iface_id);
 
@@ -231,9 +232,9 @@ struct ServerPropertyBase
       return eval_(this, iter);
    }
 
-   void evalSet(DBusMessageIter& iter)
+   void evalSet(Decoder& d)
    {
-      eval_set_(this, iter);
+      eval_set_(this, d);
    }
 
 #if SIMPPL_HAVE_INTROSPECTION
@@ -278,7 +279,8 @@ struct BaseProperty : ServerPropertyBase
    {
        auto that = ((BaseProperty*)obj);
 
-       detail::PropertyCodec<DataT>::encode(*iter, std::get_if<cb_type>(&that->t_) ? (std::get<cb_type>(that->t_))() : std::get<DataT>(that->t_));
+       Encoder e(*iter);
+       detail::PropertyCodec<DataT>::encode(e, std::get_if<cb_type>(&that->t_) ? (std::get<cb_type>(that->t_))() : std::get<DataT>(that->t_));
    }
 
    /**
@@ -288,7 +290,8 @@ struct BaseProperty : ServerPropertyBase
    void notify(const DataT& data)
    {
       this->parent_->send_property_change(this->name_, this->iface_id_, [this, data](DBusMessageIter& iter){
-         detail::PropertyCodec<DataT>::encode(iter, data);
+         Encoder e(iter);
+         detail::PropertyCodec<DataT>::encode(e, data);
       });
    }
 
@@ -409,12 +412,12 @@ struct ServerProperty : BaseProperty<DataT>, std::conditional<Flags & ReadWrite,
 protected:
 
     static
-    void __eval_set(ServerPropertyBase* obj, DBusMessageIter& iter)
+    void __eval_set(ServerPropertyBase* obj, Decoder& dec)
     {
         ServerProperty* that = (ServerProperty*)obj;
 
         DataT t;
-        detail::PropertyCodec<DataT>::decode(iter, t);
+        detail::PropertyCodec<DataT>::decode(dec, t);
 
         if (that->__set(t))
             *that = std::move(t);
@@ -424,9 +427,8 @@ protected:
 #if SIMPPL_HAVE_INTROSPECTION
    void introspect(std::ostream& os) const override
    {
-      os << "    <property name=\"" << this->name_ << "\" type=\"";
-      Codec<DataT>::make_type_signature(os);
-      os << "\" access=\"" << (Flags & ReadWrite?"readwrite":"read") << "\"/>\n";
+      os << "    <property name=\"" << this->name_ << "\" type=\"" << signature_of<DataT>()
+         << "\" access=\"" << (Flags & ReadWrite?"readwrite":"read") << "\"/>\n";
    }
 #endif
 };

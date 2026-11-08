@@ -50,6 +50,7 @@ struct EnumTypeCodeHelper<T, false>
 
 template<typename T>
 struct CodecImpl<T, Pod>
+ : composite_signature<signature_chars<detail::EnumTypeCodeHelper<T, std::is_enum<T>::value>::value>>
 {
    enum { dbus_type_code = detail::EnumTypeCodeHelper<T, std::is_enum<T>::value>::value };
       
@@ -57,23 +58,41 @@ struct CodecImpl<T, Pod>
       
       
    static inline
-   void encode(DBusMessageIter& iter, const T& t)
+   void encode(Encoder& e, const T& t)
    {
-      dbus_message_iter_append_basic(&iter, dbus_type_code, &t);
+      e.append_basic(dbus_type_code, &t);
    }
    
    
    static inline
-   void decode(DBusMessageIter& iter, T& t)
+   void decode(Decoder& d, T& t)
    {
-      simppl_dbus_message_iter_get_basic(&iter, &t, dbus_type_code);
+      d.get_basic(&t, dbus_type_code);
    }
-   
-   
+};
+
+
+/**
+ * D-Bus has no single precision type, a float is transferred as double.
+ */
+template<>
+struct CodecImpl<float, Pod> : composite_signature<signature_chars<DBUS_TYPE_DOUBLE>>
+{
    static inline
-   std::ostream& make_type_signature(std::ostream& os)
+   void encode(Encoder& e, const float& f)
    {
-      return os << (char)dbus_type_code;
+      const double d = f;
+      e.append_basic(DBUS_TYPE_DOUBLE, &d);
+   }
+
+
+   static inline
+   void decode(Decoder& d, float& f)
+   {
+      double value;
+      d.get_basic(&value, DBUS_TYPE_DOUBLE);
+
+      f = static_cast<float>(value);
    }
 };
 
